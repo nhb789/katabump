@@ -12,7 +12,7 @@ chromium.use(stealth);
 const CHROME_PATH = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 const USER_DATA_DIR = path.join(__dirname, 'ChromeData_Katabump');
 const DEBUG_PORT = 9222;
-const HEADLESS = false;
+const HEADLESS = true;
 // const HTTP_PROXY = ""
 // --- Proxy Configuration ---
 const HTTP_PROXY = process.env.HTTP_PROXY; // e.g., http://user:pass@1.2.3.4:8080 or http://1.2.3.4:8080
