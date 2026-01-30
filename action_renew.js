@@ -89,7 +89,6 @@ async function launchChrome() {
         '--headless=new', // 云端必须 headless
         '--disable-gpu',
         '--window-size=1280,720',
-        '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     ], {
         detached: true,
         stdio: 'ignore'
@@ -234,6 +233,24 @@ async function attemptTurnstileCdp(page) {
                 await pwdInput.fill(user.password);
                 await page.waitForTimeout(500);
                 await page.getByRole('button', { name: 'Login', exact: true }).click();
+
+                // User Request: Check for incorrect password
+                try {
+                    const errorMsg = page.getByText('Incorrect password or no account');
+                    if (await errorMsg.isVisible({ timeout: 3000 })) {
+                        console.error(`   >> ❌ Login failed: Incorrect password or no account for user ${user.username}`);
+                        // Screenshot for login failure
+                        const fs = require('fs');
+                        const path = require('path');
+                        const photoDir = path.join(process.cwd(), 'screenshots');
+                        if (!fs.existsSync(photoDir)) fs.mkdirSync(photoDir, { recursive: true });
+                        const safeUsername = user.username.replace(/[^a-z0-9]/gi, '_');
+                        try { await page.screenshot({ path: path.join(photoDir, `${safeUsername}.png`), fullPage: true }); } catch (e) { }
+
+                        continue;
+                    }
+                } catch (e) { }
+
             } catch (e) {
                 console.log('Login error:', e.message);
             }
@@ -250,133 +267,161 @@ async function attemptTurnstileCdp(page) {
 
             // --- Renew 逻辑 (与 renew.js 核心一致) ---
             let renewSuccess = false;
-            for (let attempt = 1; attempt <= 3; attempt++) {
-                if (attempt > 1) {
-                    console.log(`[Attempt ${attempt}] Reloading...`);
-                    await page.reload();
-                    await page.waitForTimeout(3000);
-                }
+            // 2. 一个扁平化的主循环：尝试 Renew 整个流程 (最多 20 次)
+            for (let attempt = 1; attempt <= 20; attempt++) {
 
-                console.log('Looking for Renew button...');
+                // 1. 如果是重试 (attempt > 1)，说明之前失败了或者刚刷新完页面
+                // 我们直接开始寻找 Renew 按钮
+                console.log(`\n[Attempt ${attempt}/20] Looking for Renew button...`);
+
                 const renewBtn = page.getByRole('button', { name: 'Renew', exact: true }).first();
-                await page.waitForTimeout(2000);
+                try {
+                    // 稍微等待一下，防止页面刚刷新还没渲染出来
+                    await renewBtn.waitFor({ state: 'visible', timeout: 5000 });
+                } catch (e) { }
 
                 if (await renewBtn.isVisible()) {
                     await renewBtn.click();
-                    const modal = page.locator('#renew-modal');
-                    try { await modal.waitFor({ state: 'visible', timeout: 5000 }); } catch (e) { }
+                    console.log('Renew button clicked. Waiting for modal...');
 
-                    // Mouse move simulation
+                    const modal = page.locator('#renew-modal');
+                    try { await modal.waitFor({ state: 'visible', timeout: 5000 }); } catch (e) {
+                        console.log('Modal did not appear? Retrying...');
+                        continue;
+                    }
+
+                    // A. 在模态框里晃晃鼠标
                     try {
                         const box = await modal.boundingBox();
                         if (box) await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 5 });
                     } catch (e) { }
 
-                    // Verify Loop
-                    let verified = false;
-
-                    for (let verifyAttempt = 0; verifyAttempt < 10; verifyAttempt++) {
-                        console.log(`[Verify Loop ${verifyAttempt + 1}]...`);
-
-                        // 0. Ensure modal is open, reopen if needed (RESTART flow)
-                        if (!await modal.isVisible()) {
-                            console.log('   >> Modal closed. Re-opening...');
-                            if (await renewBtn.isVisible()) {
-                                await renewBtn.click();
-                                try { await modal.waitFor({ state: 'visible', timeout: 5000 }); } catch (e) { continue; }
-                                await page.waitForTimeout(1000);
-                            } else {
-                                break;
-                            }
-                        } else {
-                            console.log('   >> Modal is already open. Proceeding...');
-                        }
-
-                        // A. Find Turnstile (Retry loop)
-                        let cdpClickResult = false;
-                        for (let findAttempt = 0; findAttempt < 5; findAttempt++) {
-                            cdpClickResult = await attemptTurnstileCdp(page);
-                            if (cdpClickResult) break;
-                            await page.waitForTimeout(1000);
-                        }
-
-                        let isTurnstileSuccess = false;
-                        if (cdpClickResult) {
-                            console.log('   >> CDP active, waiting 8s...');
-                            await page.waitForTimeout(8000);
-                        } else {
-                            // If not clicked, wait a bit
-                            await page.waitForTimeout(1000);
-                        }
-
-                        // Check Success
-                        const frames = page.frames();
-                        for (const f of frames) {
-                            if (f.url().includes('cloudflare')) {
-                                try {
-                                    if (await f.getByText('Success!', { exact: false }).isVisible({ timeout: 500 })) {
-                                        isTurnstileSuccess = true;
-                                        break;
-                                    }
-                                } catch (e) { }
-                            }
-                        }
-
-                        const confirmBtn = modal.getByRole('button', { name: 'Renew' });
-                        if (await confirmBtn.isVisible()) {
-
-                            // STRICT CHECK: Don't click Renew unless we clicked CAPTCHA or saw Success
-                            if (!cdpClickResult && !isTurnstileSuccess) {
-                                console.log('   >> Not ready, skipping click...');
-                                await page.waitForTimeout(2000);
-                                continue;
-                            }
-
-                            console.log('   >> Clicking Renew...');
-                            await confirmBtn.click();
-
-                            // Error Check
-                            let hasError = false;
-                            try {
-                                const errorMsg = page.getByText('Please complete the captcha to continue');
-                                if (await errorMsg.isVisible({ timeout: 2000 })) hasError = true;
-                            } catch (e) { }
-
-                            if (hasError) {
-                                console.log('   >> Error detected. Refreshing page to reset Turnstile...');
-                                await page.reload();
-                                await page.waitForTimeout(3000);
-                                continue;
-                            }
-
-                            await page.waitForTimeout(2000);
-                            if (!await modal.isVisible()) {
-                                console.log('   >> Renew successful!');
-                                verified = true;
-                                break;
-                            }
-                        } else {
-                            await page.waitForTimeout(1000);
-                        }
+                    // B. 找 Turnstile (小重试)
+                    console.log('Checking for Turnstile (using CDP bypass)...');
+                    let cdpClickResult = false;
+                    for (let findAttempt = 0; findAttempt < 5; findAttempt++) {
+                        cdpClickResult = await attemptTurnstileCdp(page);
+                        if (cdpClickResult) break;
+                        console.log(`   >> [Find Attempt ${findAttempt + 1}/5] Turnstile checkbox not found yet...`);
+                        await page.waitForTimeout(1000);
                     }
 
-                    if (verified) {
-                        renewSuccess = true;
-                        break;
+                    let isTurnstileSuccess = false;
+                    if (cdpClickResult) {
+                        console.log('   >> CDP Click active. Waiting 8s for Cloudflare check...');
+                        await page.waitForTimeout(8000);
                     } else {
-                        try {
-                            const closeBtn = modal.getByLabel('Close');
-                            if (await closeBtn.isVisible()) await closeBtn.click();
-                        } catch (e) { }
+                        console.log('   >> Turnstile checkbox not confirmed after retries.');
                     }
+
+                    // C. 检查 Success 标志
+                    const frames = page.frames();
+                    for (const f of frames) {
+                        if (f.url().includes('cloudflare')) {
+                            try {
+                                if (await f.getByText('Success!', { exact: false }).isVisible({ timeout: 500 })) {
+                                    console.log('   >> Detected "Success!" in Turnstile iframe.');
+                                    isTurnstileSuccess = true;
+                                    break;
+                                }
+                            } catch (e) { }
+                        }
+                    }
+
+                    // D. 准备点击确认
+                    const confirmBtn = modal.getByRole('button', { name: 'Renew' });
+                    if (await confirmBtn.isVisible()) {
+
+                        // User Request: 找不到的话这个循环直接下一步点击renew，然后检测有没有Please complete the captcha to continue
+                        console.log('   >> Clicking Renew confirm button (regardless of Turnstile status)...');
+                        await confirmBtn.click();
+
+                        try {
+                            // 1. Check for Errors (Captcha or Date limit)
+                            const startVerifyTime = Date.now();
+                            while (Date.now() - startVerifyTime < 3000) {
+                                // A. Captcha Error
+                                if (await page.getByText('Please complete the captcha to continue').isVisible()) {
+                                    console.log('   >> ⚠️ Error detected: "Please complete the captcha".');
+                                    hasCaptchaError = true;
+                                    break;
+                                }
+
+                                // B. Not Renew Time Error
+                                const notTimeLoc = page.getByText("You can't renew your server yet");
+                                if (await notTimeLoc.isVisible()) {
+                                    const text = await notTimeLoc.innerText();
+                                    const match = text.match(/as of\s+(.*?)\s+\(/);
+                                    let dateStr = match ? match[1] : 'Unknown Date';
+                                    console.log(`   >> ⏳ Cannot renew yet. Next renewal available as of: ${dateStr}`);
+
+                                    renewSuccess = true; // Mark as done to stop retries
+                                    try {
+                                        const closeBtn = modal.getByLabel('Close');
+                                        if (await closeBtn.isVisible()) await closeBtn.click();
+                                    } catch (e) { }
+                                    break;
+                                }
+                                await page.waitForTimeout(200);
+                            }
+                        } catch (e) { }
+
+                        if (renewSuccess) break; // Break loop if not time yet
+
+                        if (hasCaptchaError) {
+                            console.log('   >> Error found. Refreshing page to reset Turnstile...');
+                            await page.reload();
+                            await page.waitForTimeout(3000);
+                            continue; // 刷新后，重新开始大循环
+                        }
+
+                        // F. 检查成功 (模态框消失)
+                        await page.waitForTimeout(2000);
+                        if (!await modal.isVisible()) {
+                            console.log('   >> ✅ Modal closed. Renew successful!');
+                            renewSuccess = true;
+                            // 成功了！退出循环
+                            break;
+                        } else {
+                            console.log('   >> Modal still open but no error? Weird. Retrying loop...');
+                            // 可以选择 continue 或只是重试下一次循环，这里我们选择刷新重来，确保稳健
+                            await page.reload();
+                            await page.waitForTimeout(3000);
+                            continue;
+                        }
+                    } else {
+                        console.log('   >> Verify button inside modal not found? Refreshing...');
+                        await page.reload();
+                        await page.waitForTimeout(3000);
+                        continue;
+                    }
+
                 } else {
-                    console.log('Renew button not found (Already renewed?)');
+                    console.log('Renew button not found (Server might be already renewed or page load error).');
                     break;
                 }
             }
         } catch (err) {
             console.error(`Error processing user:`, err);
         }
+
+        // Snapshot before handling next user
+        // In GitHub Actions, we save to 'screenshots' dir
+        const fs = require('fs');
+        const path = require('path');
+        const photoDir = path.join(process.cwd(), 'screenshots');
+        if (!fs.existsSync(photoDir)) fs.mkdirSync(photoDir, { recursive: true });
+        // Use safe filename
+        const safeUsername = user.username.replace(/[^a-z0-9]/gi, '_');
+        const screenshotPath = path.join(photoDir, `${safeUsername}.png`);
+        try {
+            await page.screenshot({ path: screenshotPath, fullPage: true });
+            console.log(`Saved screenshot to: ${screenshotPath}`);
+        } catch (e) {
+            console.log('Failed to take screenshot:', e.message);
+        }
+
+        console.log(`Finished processing user\n`);
     }
 
     console.log('Done.');

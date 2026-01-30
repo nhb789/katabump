@@ -4,3 +4,4 @@ ChromeData_Katabump/
 .env
 *.log
 .DS_Store
+photo/

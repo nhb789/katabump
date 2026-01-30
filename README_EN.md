@@ -26,6 +26,11 @@ This is the easiest way to set it up once and have it run automatically every da
     ```json
     [{"username": "your_email@example.com", "password": "your_password"}, {"username": "another@example.com", "password": "pwd"}]
     ```
+### 4. Results & Screenshots
+- **Logs**: Check real-time logs in the `Run Renew Script` step.
+- **Screenshots**: Screenshots are automatically captured for each user (success or failure) and uploaded as artifacts.
+  - Download the `screenshots` zip file from the **Artifacts** section of the workflow run summary.
+  - Files are named `username.png`.
 5.  Save it. Then, go to the **Actions** tab and enable the workflow. It is scheduled to run automatically at **08:00 Beijing Time (00:00 UTC)**.
 6.  You can also manually click "Run workflow" to test it immediately.
 
@@ -64,7 +69,7 @@ Open the `renew.js` file and look for lines 11-12:
 ```javascript
 const CHROME_PATH = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 const USER_DATA_DIR = path.join(__dirname, 'ChromeData_Katabump');
-const HEADLESS = false;
+const HEADLESS = true;
 ```
 
 *   **CHROME_PATH**: This is the installation path of your local Chrome browser. Modify this if your installation path is different!
@@ -73,15 +78,15 @@ const HEADLESS = false;
     *   **Purpose**: It helps maintain your login session so you don't need to re-enter credentials every time.
     *   **Can it be deleted?**: **Yes**. If you want to reset all states (clear cache completely), simply delete this folder. The script will recreate it the next time it runs.
 *   **HEADLESS**:
-    *   `false`: (Default) The script launches a visible Chrome window so you can see what it's doing.
-    *   `true`: Runs silently in the background (headless mode), useful if you want it to run without disturbing you.
+    *   `false`: The script launches a visible Chrome window so you can see what it's doing.
+    *   `true`: (Default) Runs silently in the background (headless mode), useful if you want it to run without disturbing you.
 
 ### 5. Run Script
 Execute in terminal:
 ```bash
 node renew.js
 ```
-The script will launch a Chrome window (visible by default) and proceed to renew servers for users in the list one by one.
+The script will auto-launch Chrome (if needed), process each account, and save a screenshot (`username.png`) in the `photo/` directory upon completion.
 
 ---
 
