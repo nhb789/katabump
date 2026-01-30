@@ -3,6 +3,7 @@ const stealth = require('puppeteer-extra-plugin-stealth')();
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const axios = require('axios');
 const http = require('http');
 
 // 启用 stealth 插件
@@ -12,6 +13,26 @@ const CHROME_PATH = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
 const USER_DATA_DIR = path.join(__dirname, 'ChromeData_Katabump');
 const DEBUG_PORT = 9222;
 const HEADLESS = true;
+const HTTP_PROXY = "http://xcq0607:1234567890xyz@51.75.118.18:20243"
+// --- Proxy Configuration ---
+// const HTTP_PROXY = process.env.HTTP_PROXY; // e.g., http://user:pass@1.2.3.4:8080 or http://1.2.3.4:8080
+let PROXY_CONFIG = null;
+
+if (HTTP_PROXY) {
+    try {
+        const proxyUrl = new URL(HTTP_PROXY);
+        PROXY_CONFIG = {
+            server: `${proxyUrl.protocol}//${proxyUrl.hostname}:${proxyUrl.port}`,
+            username: proxyUrl.username ? decodeURIComponent(proxyUrl.username) : undefined,
+            password: proxyUrl.password ? decodeURIComponent(proxyUrl.password) : undefined
+        };
+        console.log(`[Proxy] Configuration detected: Server=${PROXY_CONFIG.server}, Auth=${PROXY_CONFIG.username ? 'Yes' : 'No'}`);
+    } catch (e) {
+        console.error('[Proxy] Invalid HTTP_PROXY format. Expected: http://user:pass@host:port or http://host:port');
+        process.exit(1);
+    }
+}
+
 
 // --- injected.js 核心逻辑 ---
 // 这个脚本会被注入到每个 Frame 中。它劫持 attachShadow 以捕获 Turnstile 的 checkbox，
@@ -78,6 +99,38 @@ const INJECTED_SCRIPT = `
 })();
 `;
 
+// 辅助函数：检测代理是否可用
+async function checkProxy() {
+    if (!PROXY_CONFIG) return true;
+
+    console.log('[Proxy] Validating proxy connection...');
+    try {
+        const axiosConfig = {
+            proxy: {
+                protocol: 'http',
+                host: new URL(PROXY_CONFIG.server).hostname,
+                port: new URL(PROXY_CONFIG.server).port,
+            },
+            timeout: 10000
+        };
+
+        if (PROXY_CONFIG.username && PROXY_CONFIG.password) {
+            axiosConfig.proxy.auth = {
+                username: PROXY_CONFIG.username,
+                password: PROXY_CONFIG.password
+            };
+        }
+
+        // 尝试访问一个可靠的测试地址 (Cloudflare Trace 或者 Google)
+        await axios.get('https://www.google.com', axiosConfig);
+        console.log('[Proxy] Connection successful!');
+        return true;
+    } catch (error) {
+        console.error(`[Proxy] Connection failed: ${error.message}`);
+        return false;
+    }
+}
+
 // 辅助函数：检测端口是否开放
 function checkPort(port) {
     return new Promise((resolve) => {
@@ -104,6 +157,13 @@ async function launchNativeChrome() {
         '--no-first-run',
         '--no-default-browser-check',
     ];
+
+    if (PROXY_CONFIG) {
+        // Chrome 命令行只接受 server 地址，认证需要在 playright 层或者插件层处理
+        // 这里我们要 strip 掉 username:password
+        args.push(`--proxy-server=${PROXY_CONFIG.server}`);
+    }
+
     if (HEADLESS) {
         args.push('--headless=new');
     }
@@ -202,6 +262,15 @@ async function attemptTurnstileCdp(page) {
         return;
     }
 
+    // 检查代理有效性
+    if (PROXY_CONFIG) {
+        const isValid = await checkProxy();
+        if (!isValid) {
+            console.error('[Proxy] Aborting due to invalid proxy.');
+            process.exit(1);
+        }
+    }
+
     await launchNativeChrome();
 
     console.log(`Connecting to Chrome instance...`);
@@ -226,6 +295,15 @@ async function attemptTurnstileCdp(page) {
     let page = context.pages().length > 0 ? context.pages()[0] : await context.newPage();
     page.setDefaultTimeout(60000);
 
+    // --- 代理认证处理 ---
+    if (PROXY_CONFIG && PROXY_CONFIG.username) {
+        console.log('[Proxy] Setting up authentication...');
+        await context.setHTTPCredentials({
+            username: PROXY_CONFIG.username,
+            password: PROXY_CONFIG.password
+        });
+    }
+
     // --- 关键：注入 Hook 脚本 ---
     // 这会在每次页面加载/导航前执行，确保能拦截到 Turnstile 的创建
     await page.addInitScript(INJECTED_SCRIPT);
@@ -238,6 +316,7 @@ async function attemptTurnstileCdp(page) {
         try {
             if (page.isClosed()) {
                 page = await context.newPage();
+                // Context credentials should persist, no need to re-auth per page
                 await page.addInitScript(INJECTED_SCRIPT); // 新页面也要注入
             }
 

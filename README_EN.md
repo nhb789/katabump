@@ -26,6 +26,12 @@ This is the easiest way to set it up once and have it run automatically every da
     ```json
     [{"username": "your_email@example.com", "password": "your_password"}, {"username": "another@example.com", "password": "pwd"}]
     ```
+5.  **(Optional) Configure Proxy**:
+    If you need to run behind a proxy (e.g. to avoid IP blocks), add a Secret named `HTTP_PROXY`.
+    -   **Format**:
+        -   No Auth: `http://ip:port`
+        -   With Auth: `http://username:password@ip:port`
+    -   **Note**: The script validates the proxy before use. Default is disabled.
 ### 4. Results & Screenshots
 - **Logs**: Check real-time logs in the `Run Renew Script` step.
 - **Screenshots**: Screenshots are automatically captured for each user (success or failure) and uploaded as artifacts.
@@ -82,7 +88,22 @@ const HEADLESS = true;
     *   `true`: (Default) Runs silently in the background (headless mode), useful if you want it to run without disturbing you.
 
 ### 5. Run Script
-Execute in terminal:
+
+If you need to use a proxy, set the `HTTP_PROXY` environment variable:
+
+**Powershell:**
+```powershell
+$env:HTTP_PROXY="http://user:pass@127.0.0.1:7890"
+node renew.js
+```
+
+**CMD:**
+```cmd
+set HTTP_PROXY=http://user:pass@127.0.0.1:7890
+node renew.js
+```
+
+Or just run without proxy:
 ```bash
 node renew.js
 ```

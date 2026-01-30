@@ -2,6 +2,7 @@ const { chromium } = require('playwright-extra');
 const stealth = require('puppeteer-extra-plugin-stealth')();
 const { spawn } = require('child_process');
 const http = require('http');
+const axios = require('axios');
 
 // 启用 stealth 插件
 chromium.use(stealth);
@@ -9,6 +10,25 @@ chromium.use(stealth);
 // GitHub Actions 环境下的 Chrome 路径 (通常是 google-chrome)
 const CHROME_PATH = process.env.CHROME_PATH || '/usr/bin/google-chrome';
 const DEBUG_PORT = 9222;
+
+// --- Proxy Configuration ---
+const HTTP_PROXY = process.env.HTTP_PROXY;
+let PROXY_CONFIG = null;
+
+if (HTTP_PROXY) {
+    try {
+        const proxyUrl = new URL(HTTP_PROXY);
+        PROXY_CONFIG = {
+            server: `${proxyUrl.protocol}//${proxyUrl.hostname}:${proxyUrl.port}`,
+            username: proxyUrl.username ? decodeURIComponent(proxyUrl.username) : undefined,
+            password: proxyUrl.password ? decodeURIComponent(proxyUrl.password) : undefined
+        };
+        console.log(`[Proxy] Configuration detected: Server=${PROXY_CONFIG.server}, Auth=${PROXY_CONFIG.username ? 'Yes' : 'No'}`);
+    } catch (e) {
+        console.error('[Proxy] Invalid HTTP_PROXY format. Expected: http://user:pass@host:port or http://host:port');
+        process.exit(1);
+    }
+}
 
 // --- INJECTED_SCRIPT ---
 const INJECTED_SCRIPT = `
@@ -64,6 +84,37 @@ const INJECTED_SCRIPT = `
 })();
 `;
 
+// 辅助函数：检测代理是否可用
+async function checkProxy() {
+    if (!PROXY_CONFIG) return true;
+
+    console.log('[Proxy] Validating proxy connection...');
+    try {
+        const axiosConfig = {
+            proxy: {
+                protocol: 'http',
+                host: new URL(PROXY_CONFIG.server).hostname,
+                port: new URL(PROXY_CONFIG.server).port,
+            },
+            timeout: 10000
+        };
+
+        if (PROXY_CONFIG.username && PROXY_CONFIG.password) {
+            axiosConfig.proxy.auth = {
+                username: PROXY_CONFIG.username,
+                password: PROXY_CONFIG.password
+            };
+        }
+
+        await axios.get('https://www.google.com', axiosConfig);
+        console.log('[Proxy] Connection successful!');
+        return true;
+    } catch (error) {
+        console.error(`[Proxy] Connection failed: ${error.message}`);
+        return false;
+    }
+}
+
 function checkPort(port) {
     return new Promise((resolve) => {
         const req = http.get(`http://localhost:${port}/json/version`, (res) => {
@@ -82,14 +133,21 @@ async function launchChrome() {
     }
 
     console.log(`Launching Chrome from ${CHROME_PATH}...`);
-    const chrome = spawn(CHROME_PATH, [
+
+    const args = [
         `--remote-debugging-port=${DEBUG_PORT}`,
         '--no-first-run',
         '--no-default-browser-check',
         '--headless=new', // 云端必须 headless
         '--disable-gpu',
         '--window-size=1280,720',
-    ], {
+    ];
+
+    if (PROXY_CONFIG) {
+        args.push(`--proxy-server=${PROXY_CONFIG.server}`);
+    }
+
+    const chrome = spawn(CHROME_PATH, args, {
         detached: true,
         stdio: 'ignore'
     });
@@ -172,6 +230,14 @@ async function attemptTurnstileCdp(page) {
         process.exit(1);
     }
 
+    if (PROXY_CONFIG) {
+        const isValid = await checkProxy();
+        if (!isValid) {
+            console.error('[Proxy] Aborting due to invalid proxy.');
+            process.exit(1);
+        }
+    }
+
     await launchChrome();
 
     console.log(`Connecting to Chrome...`);
@@ -196,6 +262,14 @@ async function attemptTurnstileCdp(page) {
     let page = context.pages().length > 0 ? context.pages()[0] : await context.newPage();
     page.setDefaultTimeout(60000);
 
+    if (PROXY_CONFIG && PROXY_CONFIG.username) {
+        console.log('[Proxy] Setting up authentication...');
+        await context.setHTTPCredentials({
+            username: PROXY_CONFIG.username,
+            password: PROXY_CONFIG.password
+        });
+    }
+
     await page.addInitScript(INJECTED_SCRIPT);
     console.log('Injection script added.');
 
@@ -206,6 +280,7 @@ async function attemptTurnstileCdp(page) {
         try {
             if (page.isClosed()) {
                 page = await context.newPage();
+                // Context credentials apply
                 await page.addInitScript(INJECTED_SCRIPT);
             }
 

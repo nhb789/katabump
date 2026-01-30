@@ -26,6 +26,12 @@
    ```json
    [{"username": "your_email@example.com", "password": "your_password"}, {"username": "another@example.com", "password": "pwd"}]
    ```
+5. **(可选) 配置代理**:
+   如果 GitHub Actions 的 IP 被屏蔽，或者你想使用特定的 IP 访问，可以添加名为 `HTTP_PROXY` 的 Secret。
+   - **格式**:
+     - 无认证: `http://ip:port`
+     -带认证: `http://username:password@ip:port`
+   - **说明**: 脚本会自动检测代理有效性，如果支持认证会自动处理。默认不启用。
 
 ### 4. 运行结果与截图
 
@@ -94,6 +100,21 @@ const HEADLESS = true;
 
 ### 3. 运行脚本
 
+如果你需要使用代理运行脚本，请设置环境变量 `HTTP_PROXY`：
+
+**Powershell:**
+```powershell
+$env:HTTP_PROXY="http://user:pass@127.0.0.1:7890"
+node renew.js
+```
+
+**CMD:**
+```cmd
+set HTTP_PROXY=http://user:pass@127.0.0.1:7890
+node renew.js
+```
+
+如果不设置代理，直接运行：
 ```bash
 node renew.js
 ```
