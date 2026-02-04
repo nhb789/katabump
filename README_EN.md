@@ -32,6 +32,11 @@ This is the easiest way to set it up once and have it run automatically every da
         -   No Auth: `http://ip:port`
         -   With Auth: `http://username:password@ip:port`
     -   **Note**: The script validates the proxy before use. Default is disabled.
+6.  **(Optional) Telegram Notifications**:
+    If you want to receive Telegram notifications (with screenshots) upon renewal success, failure, or skip, add the following Secrets:
+    -   `TG_BOT_TOKEN`: Your Telegram Bot Token (from @BotFather).
+    -   `TG_CHAT_ID`: Your Chat ID (User ID or Group ID).
+    > If not configured, notifications will be skipped.
 ### 4. Results & Screenshots
 - **Logs**: Check real-time logs in the `Run Renew Script` step.
 - **Screenshots**: Screenshots are automatically captured for each user (success or failure) and uploaded as artifacts.

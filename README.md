@@ -33,6 +33,12 @@
      -带认证: `http://username:password@ip:port`
    - **说明**: 脚本会自动检测代理有效性，如果支持认证会自动处理。默认不启用。
 
+6. **(可选) Telegram 消息推送**:
+   如果你希望在续期成功、失败或跳过时收到 Telegram 通知（包含截图），请配置以下 Secret：
+   - `TG_BOT_TOKEN`: 你的 Telegram Bot Token (从 @BotFather 获取)。
+   - `TG_CHAT_ID`: 你的 Chat ID (用户 ID 或群组 ID)。
+   > 如果未配置，脚本将跳过发送通知。
+
 ### 4. 运行结果与截图
 
 - **运行日志**: 在 Actions 中的 `Run Renew Script` 步骤查看。
